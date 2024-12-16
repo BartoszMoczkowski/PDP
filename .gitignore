@@ -1,3 +1,6 @@
 Random*
 RM *
 test*
+.ipynb_checkpoints
+~$*
+*.pyc
