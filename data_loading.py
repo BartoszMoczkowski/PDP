@@ -34,11 +34,11 @@ class DataCore():
             self.excel_data[float(sheet_name)] = excel_file.parse(sheet_name,header=None)
 
     def create_excel_template(self,n_connectors,path="template.xlsx",n_wavelengths=1,n_fibers=1):
-        
+
 
         #
         Sheet = np.zeros((n_connectors*n_connectors+2,n_fibers+2),dtype=object)
-        
+
         #setting constant cells
         Sheet[0,0] = "Reference Configuration"
         Sheet[1,0] = "Reference Connector"
@@ -55,7 +55,7 @@ class DataCore():
         writer = pd.ExcelWriter(path,engine="xlsxwriter")
         for i in range(n_wavelengths):
             excel_df.to_excel(writer,sheet_name=f"wavelength_{i}",index=False,header=False)
-        
+
         workbook = writer.book
         merge_format = workbook.add_format(
             {
@@ -79,7 +79,7 @@ class DataCore():
 
     def all_cells(self,data : pd.DataFrame) -> np.ndarray:
         """Returns values all cells read from a given data fram
-        
+
         Since data from the excel file is stored in a dictionary this should
         be called on output of DataCore.IL_wavelength"""
         return data.to_numpy()
@@ -97,7 +97,7 @@ class DataCore():
         # the first one cannot be used since it contains multiple entries
         # for different wavelengths
         return int(np.sqrt(self.all_IL_values(data).shape[0]))
-    
+
     def n_fibers(self,data : pd.DataFrame) -> int:
         """Returns the expected number of fiber present in the data"""
         #the second dimensions corresponds to the number of connectors
@@ -129,7 +129,7 @@ class DataCore():
         return self.all_IL_values()[:,[2*index, 2*index + 1]]
 
 
-    def IL_wavelength(self,wavelength : float) -> np.ndarray:
+    def IL_wavelength(self,wavelength : float) -> pd.DataFrame:
         """Returns values of IL for a given wavelength"""
 
 
@@ -204,8 +204,18 @@ class DataCore():
         return {wavelength : self.all_IL_values(self.IL_wavelength(wavelength)) for wavelength in self.wavelengths()}
 
 
-    def IL_connectors(self) -> list[np.ndarray]:
-        return np.split(self.all_IL_values(),self.n_connectors(),axis=1)
+    def IL_connectors(self) -> list[np.ndarray] | np.ndarray:
+        wave_IL = self.excel_data
+        connector_data = []
+        for wave in wave_IL:
+            data = wave_IL[wave]
+            print(data.shape)
+            connector = np.split(self.all_IL_values(data),self.n_connectors(data),axis=0)
+            connector_data.append(np.array(connector))
+
+        X = np.hstack(connector_data)
+
+        return X
 
 
     def filter_nan(self,A : np.ndarray) -> np.ndarray:
@@ -222,7 +232,7 @@ if __name__ == "__main__":
 
     #example
     DC = DataCore()
-    DC.load_excel("E60F4420.xlsx")
+    DC.load_excel("ExampleData.xlsx")
 
 
     wavelength_ex = DC.wavelengths()[0]
