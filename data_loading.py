@@ -78,7 +78,7 @@ class DataCore():
 
 
     def all_cells(self,data : pd.DataFrame) -> np.ndarray:
-        """Returns values all cells read from a given data fram
+        """Returns values all cells read from a given DataFrame
 
         Since data from the excel file is stored in a dictionary this should
         be called on output of DataCore.IL_wavelength"""
@@ -87,8 +87,6 @@ class DataCore():
 
     def all_IL_values(self,data : pd.DataFrame) -> np.ndarray:
         """"Returns values of all cells where we expect IL values"""
-        # bounds [3:,1;] correspond to the main portion of the data in the excel file
-        # everything else is data about wavelengths and jumper/connectors indecies
         return self.all_cells(data)[2:,2:]
 
     def n_connectors(self,data : pd.DataFrame) -> int:
@@ -106,7 +104,7 @@ class DataCore():
         return self.all_IL_values(data).shape[1]
 
     def n_jumpers(self,data : pd.DataFrame) -> int:
-        """Returns the expected number of fibers present in the data"""
+        """Returns the expected number of jumpers present in the data"""
 
         # there are two connectors per jumper
         return self.n_connectors(data)//2
@@ -119,14 +117,15 @@ class DataCore():
 
 
     def IL_reference_connetor(self, data : pd.DataFrame, index : int) -> np.ndarray:
-        """Returns values of IL for a given connector (column)"""
+        """Returns values of IL for a given reference connector"""
 
         return self.all_IL_values(data)[:,index*self.n_connectors():(index+1)*self.n_connectors()]
 
 
-    def IL_jumper(self, index : int) -> np.ndarray:
-        """Returns values of IL for a given fiber (column)"""
-        return self.all_IL_values()[:,[2*index, 2*index + 1]]
+    def IL_reference_jumper(self, data : pd.DataFrame, index : int) -> np.ndarray:
+        """Returns values of IL for a given reference jumper"""
+        return self.all_IL_values(data)[:,2*index*self.n_connectors():2*(index+1)*self.n_connectors()]
+
 
 
     def IL_wavelength(self,wavelength : float) -> pd.DataFrame:
@@ -136,23 +135,18 @@ class DataCore():
         return self.excel_data[wavelength]
 
 
-    def filter_n_fibers(self,IL_data : pd.DataFrame, fiber_indecies : list[int]) -> np.ndarray:
-        """Filters the data to only include the data for a given fiber indecies
+    def filter_n_jumper(self,IL_data : pd.DataFrame, jumper_indecies : list[int]) -> np.ndarray:
+        """Filters the data to only include the data for a given jumper indecies
 
-        Works only on data of shape m x m. In practive this means using data from
+        Works only on data of shape m^2 x n. In practive this means using data from
         DataCore.IL_wavelength
         """
 
-        if IL_data.shape[0] != IL_data.shape[1]:
-            print(f"Fitering data by fibers will most likely not work since the data has\
-                dimension 0 - {IL_data.shape[0]} not equal to dimension 1 - {IL_data.shape[1]}.\
-                This function works on square data matrices. Consider filtering by wavelength first.")
-
 
         connector_indecies = []
-        for fiber_index in fiber_indecies:
-            connector_indecies.append(2*fiber_index)
-            connector_indecies.append(2*fiber_index+1)
+        for jumper_index in jumper_indecies:
+            connector_indecies.append(2*jumper_index)
+            connector_indecies.append(2*jumper_index+1)
 
         excel_indecies = []
         for index_reference in connector_indecies:
@@ -162,31 +156,31 @@ class DataCore():
         return self.all_IL_values(IL_data)[excel_indecies,:]
 
 
-    def fiber_combinations(self, IL_data : pd.DataFrame, n_choices : int) -> list[np.ndarray]:
+    def jumper_combinations(self, IL_data : pd.DataFrame, n_choices : int) -> list[np.ndarray]:
 
-        if n_choices > self.n_fibers(IL_data):
-            print(f"Cannot chose {n_choices} from {self.n_fibers}.")
+        if n_choices > self.n_jumpers(IL_data):
+            print(f"Cannot chose {n_choices} from {self.n_jumpers}.")
 
-        all_combinations_tupples = it.combinations(range(0,self.n_fibers(IL_data)),n_choices)
+        all_combinations_tupples = it.combinations(range(0,self.n_jumpers(IL_data)),n_choices)
 
         IL_data_combinations = []
 
         for combination in all_combinations_tupples:
 
-            data = self.filter_n_fibers(IL_data,list(combination))
+            data = self.filter_n_jumper(IL_data,list(combination))
 
             IL_data_combinations.append(data)
 
         return IL_data_combinations
 
-    def fiber_combinations_all_wavelengths(self, n_choices : int) -> dict[float, list[np.ndarray]]:
+    def jumper_combinations_all_wavelengths(self, n_choices : int) -> dict[float, list[np.ndarray]]:
 
 
         wavelength_IL_combinations = {}
         for wavelength in self.wavelengths():
 
             IL_data_wavelength = self.IL_wavelength(wavelength)
-            IL_data_combinations = self.fiber_combinations(IL_data_wavelength,n_choices)
+            IL_data_combinations = self.jumper_combinations(IL_data_wavelength,n_choices)
             wavelength_IL_combinations[wavelength] = IL_data_combinations
 
 
@@ -204,18 +198,53 @@ class DataCore():
         return {wavelength : self.all_IL_values(self.IL_wavelength(wavelength)) for wavelength in self.wavelengths()}
 
 
-    def IL_connectors(self) -> list[np.ndarray] | np.ndarray:
+    def IL_reference_connectors(self) ->  np.ndarray:
+        """Create a list containg all IL values for each of the reference connectors
+        
+        Returns an array of shape n_connectors x n_wavelengths*n_connectors x n_fibers """
         wave_IL = self.excel_data
         connector_data = []
         for wave in wave_IL:
             data = wave_IL[wave]
-            print(data.shape)
             connector = np.split(self.all_IL_values(data),self.n_connectors(data),axis=0)
             connector_data.append(np.array(connector))
+            
+        return np.hstack(connector_data)
+    
+    def split_array(self,arr, k):
+        split_arrays = [] 
+        for i in range(k): 
+            split_arrays.append(arr[i::k]) 
+        return split_arrays
+    
+    def IL_dut_connectors(self) -> np.ndarray:
+        """Create a list containg all IL values for each of the DUT connectors
+        
+        Returns an array of shape n_connectors x n_wavelengths*n_connectors x n_fibers.
+        Should fullfill the same job as DataCore.IL_reference_connectors"""
+        wave_IL = self.excel_data
+        connector_data = []
+        for wave in wave_IL:
+            data = wave_IL[wave]
+            connector = self.split_array(self.all_IL_values(data),self.n_connectors(data))
+            connector_data.append(np.array(connector))
+        print(np.hstack(connector_data).shape)
 
-        X = np.hstack(connector_data)
+        return np.hstack(connector_data)
+    
+    def IL_fibers(self) -> np.ndarray:
+        """Create a list containg all IL values for each of fiber
+        
+        Returns an array of shape n_fibers x n_wavelengths*n_connectors*n_connectors x 1.
+        Could be flattened but it does not impact aggregate functions like mean, std, etc."""
+        wave_IL = self.excel_data
+        connector_data = []
+        for wave in wave_IL:
+            data = wave_IL[wave]
+            connector = np.split(self.all_IL_values(data),self.n_fibers(data),axis=1)
+            connector_data.append(np.array(connector))
 
-        return X
+        return np.hstack(connector_data)
 
 
     def filter_nan(self,A : np.ndarray) -> np.ndarray:
@@ -243,7 +272,7 @@ if __name__ == "__main__":
     print(f"Number of jumper {DC.n_jumpers(test_sheet)}")
     print(f"Number of fiber {DC.n_fibers(test_sheet)}")
 
-    wave_combinations_IL_unfiltered = DC.fiber_combinations_all_wavelengths(4)
+    wave_combinations_IL_unfiltered = DC.jumper_combinations_all_wavelengths(4)
     print(wave_combinations_IL_unfiltered)
     wave_combinations_IL = DC.map_dict(DC.filter_nan, wave_combinations_IL_unfiltered)
 
@@ -270,9 +299,27 @@ if __name__ == "__main__":
 
 
 
-    connectors_IL_unfiltered = DC.IL_connectors()
-    connectors_IL = list(map(DC.filter_nan,connectors_IL_unfiltered))
+    reference_connectors_IL_unfiltered = DC.IL_reference_connectors()
+    reference_connectors_IL = list(map(DC.filter_nan,reference_connectors_IL_unfiltered))
 
-    print("mean,std and 97th percentile for first 10 connectors")
-    print(list(map(np.mean,connectors_IL))[:10])
-    print(list(map(np.std,connectors_IL))[:10])
+    print("mean,std and 97th percentile for first 10 reference connectors")
+    print(list(map(np.mean,reference_connectors_IL))[:10])
+    print(list(map(np.std,reference_connectors_IL))[:10])
+    print(list(map(lambda x : np.percentile(x,97),reference_connectors_IL))[:10])
+
+    dut_connectors_IL_unfiltered = DC.IL_dut_connectors()
+    dut_connectors_IL = list(map(DC.filter_nan,dut_connectors_IL_unfiltered))
+    
+    
+    print("mean,std and 97th percentile for first 10 dut connectors")
+    print(list(map(np.mean,dut_connectors_IL))[:10])
+    print(list(map(np.std,dut_connectors_IL))[:10])
+    print(list(map(lambda x : np.percentile(x,97),dut_connectors_IL))[:10])
+
+    fibers_IL_unfiltered = DC.IL_fibers()
+    fibers_IL = list(map(DC.filter_nan,fibers_IL_unfiltered))
+
+    print("mean,std and 97th percentile for all fibers")
+    print(list(map(np.mean,fibers_IL)))
+    print(list(map(np.std,fibers_IL)))
+    print(list(map(lambda x : np.percentile(x,97),fibers_IL)))
