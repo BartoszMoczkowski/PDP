@@ -68,7 +68,6 @@ class DataCore():
         for worksheet in workbook.worksheets():
             column_letter = xlsxwriter.utility.xl_col_to_name(n_fibers+2)
 
-            print(f"C1:{column_letter}1")
             worksheet.set_column("A:B",20)
             worksheet.merge_range(f"C1:{column_letter}1", "Fiber Number",merge_format)
             for i in range(n_connectors):
@@ -228,7 +227,6 @@ class DataCore():
             data = wave_IL[wave]
             connector = self.split_array(self.all_IL_values(data),self.n_connectors(data))
             connector_data.append(np.array(connector))
-        print(np.hstack(connector_data).shape)
 
         return np.hstack(connector_data)
     
@@ -273,7 +271,6 @@ if __name__ == "__main__":
     print(f"Number of fiber {DC.n_fibers(test_sheet)}")
 
     wave_combinations_IL_unfiltered = DC.jumper_combinations_all_wavelengths(4)
-    print(wave_combinations_IL_unfiltered)
     wave_combinations_IL = DC.map_dict(DC.filter_nan, wave_combinations_IL_unfiltered)
 
     wave_combinations_IL_mean = DC.map_dict(lambda arr : np.mean(arr,axis=1), wave_combinations_IL)
