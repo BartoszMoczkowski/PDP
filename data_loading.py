@@ -4,7 +4,8 @@ import numpy as np
 import itertools as it
 import xlsxwriter
 from collections.abc import Callable
-
+import regex
+import xlsxwriter.utility
 class DataCore():
 
 
@@ -30,13 +31,55 @@ class DataCore():
         excel_file = pd.ExcelFile(path)
         self.excel_data = {}
         for sheet_name in excel_file.sheet_names:
-            #probably better to add regex search for wavelengt in sheet name
-            self.excel_data[float(sheet_name)] = excel_file.parse(sheet_name,header=None)
+
+            matches = regex.findall(r"([-+]?\d*\.\d+|\d+)nm",sheet_name)
+
+            if len(matches) <= 0:
+
+                if sheet_name not in ["example","instructions"]:
+
+                    self.excel_data = {}
+
+                    raise Exception(f"sheet name : {sheet_name} does not match the expected format. Outside the 'instruction' and 'example'\
+                           all excel sheets should have name in the same format as '1750nm' or '1660.1nm'")
+                    
+                
+                continue
+            
+
+            wavelength = float(matches[0])
+            
+            excel_file_df = excel_file.parse(sheet_name,header=None)
+
+
+            n_connectors = self.n_connectors(excel_file_df)
+            n_fibers = self.n_fibers(excel_file_df)
+            IL_data = self.all_IL_values(excel_file_df)
+            expected_nan_rows_indecies = [n_connectors * i + i for i in range(n_connectors)]
+
+
+            for row_index in expected_nan_rows_indecies:
+                for column_index in range(n_fibers):
+                    expected_nan_cell_value = IL_data[row_index,column_index] 
+                    if not np.isnan(float(expected_nan_cell_value)):
+                        column_letter = xlsxwriter.utility.xl_col_to_name(column_index+2)
+                        raise Exception(f"Cell value {expected_nan_cell_value} at position {column_letter}{column_index+2} is a numeric value.The field should not contain any as it corresponds to the impossible case when a conector is matched with itself.")
+
+            expected_data_shape = (n_connectors*n_connectors,n_fibers) 
+            print(IL_data.shape,expected_data_shape)
+            if IL_data.shape != expected_data_shape:
+                raise Exception(f"Loaded data has shape {IL_data.shape} while the fiber and connector numbering suggest a shape {(n_connectors*n_connectors,n_fibers)}.")
+
+            self.excel_data[wavelength] = excel_file_df
+                
+
+
+
 
     def create_excel_template(self,n_connectors,path="template.xlsx",n_wavelengths=1,n_fibers=1):
 
 
-        #
+        #add instruction and exmaple pages to the excel file
         Sheet = np.zeros((n_connectors*n_connectors+2,n_fibers+2),dtype=object)
 
         #setting constant cells
@@ -50,11 +93,19 @@ class DataCore():
         Sheet[2:n_connectors*n_connectors+2,0] = np.repeat(np.linspace(1,n_connectors,n_connectors),n_connectors)
 
 
+        example_sheet = Sheet.copy()
+        example_sheet[2:n_connectors*n_connectors+2,2:n_fibers+2] = np.round(np.random.rand(n_connectors*n_connectors,n_fibers),3)
         excel_df = pd.DataFrame(Sheet)
+        excel_df_example = pd.DataFrame(example_sheet)
+        
 
         writer = pd.ExcelWriter(path,engine="xlsxwriter")
         for i in range(n_wavelengths):
             excel_df.to_excel(writer,sheet_name=f"wavelength_{i}",index=False,header=False)
+
+        excel_df_example.to_excel(writer,sheet_name=f"example",index=False,header=False)
+
+
 
         workbook = writer.book
         merge_format = workbook.add_format(
@@ -65,13 +116,19 @@ class DataCore():
                 "valign": "vcenter",
             }
         )
-        for worksheet in workbook.worksheets():
-            column_letter = xlsxwriter.utility.xl_col_to_name(n_fibers+2)
+        nan_format = workbook.add_format({
+            "bg_color" : "red"
+        })
 
-            worksheet.set_column("A:B",20)
+        for worksheet in workbook.worksheets():
+            column_letter = xlsxwriter.utility.xl_col_to_name(n_fibers+1)
+
+            worksheet.set_column("A:B",22)
             worksheet.merge_range(f"C1:{column_letter}1", "Fiber Number",merge_format)
             for i in range(n_connectors):
                 worksheet.merge_range(f"A{3+i*n_connectors}:A{2+(i+1)*n_connectors}", f"{i+1}",merge_format)
+                for j in range(n_fibers):
+                    worksheet.write(n_connectors*i+i+2,j+2,'NaN',nan_format)
 
         writer.close()
 
@@ -86,21 +143,41 @@ class DataCore():
 
     def all_IL_values(self,data : pd.DataFrame) -> np.ndarray:
         """"Returns values of all cells where we expect IL values"""
-        return self.all_cells(data)[2:,2:]
+        n_fibers = self.n_fibers(data)
+        n_connectors = self.n_connectors(data)
+        return self.all_cells(data)[2:n_connectors*n_connectors+2,2:n_fibers+2]
 
     def n_connectors(self,data : pd.DataFrame) -> int:
         """Returns the expected number of connectors present in the data"""
         #the second dimensions corresponds to the number of connectors
         # the first one cannot be used since it contains multiple entries
         # for different wavelengths
-        return int(np.sqrt(self.all_IL_values(data).shape[0]))
+        connector_number_index = 2
+        previous_cell = self.all_cells(data)[connector_number_index,1]
+        while True:
+     
+            if self.all_cells(data)[connector_number_index+1,1] != previous_cell + 1:
+                break
+            previous_cell = self.all_cells(data)[connector_number_index + 1,1]
+            connector_number_index += 1
+
+        return int(self.all_cells(data)[connector_number_index,1])
 
     def n_fibers(self,data : pd.DataFrame) -> int:
         """Returns the expected number of fiber present in the data"""
         #the second dimensions corresponds to the number of connectors
         # the first one cannot be used since it contains multiple entries
         # for different wavelengths
-        return self.all_IL_values(data).shape[1]
+                # for different wavelengths
+        fiber_number_index = 2
+        previous_cell = self.all_cells(data)[1,fiber_number_index]
+        for fiber_number_index in range(2,self.all_cells(data).shape[1]-1):
+            if self.all_cells(data)[1,fiber_number_index+1] != previous_cell + 1:
+                break
+            previous_cell = self.all_cells(data)[1,fiber_number_index + 1]
+            fiber_number_index += 1
+
+        return int(previous_cell)
 
     def n_jumpers(self,data : pd.DataFrame) -> int:
         """Returns the expected number of jumpers present in the data"""
