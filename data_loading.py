@@ -36,7 +36,7 @@ class DataCore():
 
             if len(matches) <= 0:
 
-                if sheet_name not in ["example","instructions"]:
+                if sheet_name not in ["example","instruction"]:
 
                     self.excel_data = {}
 
@@ -104,6 +104,7 @@ class DataCore():
             excel_df.to_excel(writer,sheet_name=f"wavelength_{i}",index=False,header=False)
 
         excel_df_example.to_excel(writer,sheet_name=f"example",index=False,header=False)
+        excel_df.to_excel(writer,sheet_name=f"instruction",index=False,header=False)
 
 
 
@@ -116,19 +117,57 @@ class DataCore():
                 "valign": "vcenter",
             }
         )
+    
         nan_format = workbook.add_format({
             "bg_color" : "red"
         })
+        even_format = workbook.add_format({
+            "bg_color" : "gray"
+        })
 
         for worksheet in workbook.worksheets():
+            
             column_letter = xlsxwriter.utility.xl_col_to_name(n_fibers+1)
 
             worksheet.set_column("A:B",22)
             worksheet.merge_range(f"C1:{column_letter}1", "Fiber Number",merge_format)
+                
+            for k in range(n_connectors):
+                if k%2 == 0:
+                    continue
+                worksheet.conditional_format(n_connectors*k+2,2,n_connectors*(k+1)+1,n_fibers+1,{'type' : 'cell','criteria' : '!=','value' : '"Nan"','format' : even_format})
+
             for i in range(n_connectors):
                 worksheet.merge_range(f"A{3+i*n_connectors}:A{2+(i+1)*n_connectors}", f"{i+1}",merge_format)
+            
                 for j in range(n_fibers):
                     worksheet.write(n_connectors*i+i+2,j+2,'NaN',nan_format)
+                
+
+            if worksheet.name == "instruction":
+                column_letter_start = xlsxwriter.utility.xl_col_to_name(n_fibers+5)
+                column_letter_end = xlsxwriter.utility.xl_col_to_name(n_fibers+12)
+
+                instruction_1 = f"This is a template for a test with {n_connectors} connectors and {n_fibers} fibers made for {n_wavelengths} wavelengths."+\
+                "The results for each wavelength should be entered into one of the given worksheet named 'wavelength_1','wavelength_2',..."+\
+                "The name of the worksheet should be changed to contain the value of the tested wavelength in the following format 'wavelength+nm'. For example '1650nm'"+\
+                "The results of the test should be entered in to the cells with 0s."+\
+                "Each row should contain results for all fibers from a single test.\n"
+
+                instruction_2 = f" Column A : 'Reference connector' denotes the number of the connector currently used as a reference." +\
+                "Column B : 'DUT' (Device under test) denotes the number of the connector tested against the reference connector. " +\
+                f"Columns C to {column_letter} correspond to sequential fibers."
+
+                instruction_3 = f"The red cell with 'NaN' mark impossible cases where a connector is testd against itself. No values should be entered there."+\
+                f"Additionally the empty to the right and to the left of the table should be left empty. Entering any form of data there will result in a loading error later."
+
+                merge_format.set_text_wrap()
+                worksheet.merge_range(f"{column_letter_start}{5}:{column_letter_end}{12}", instruction_1,merge_format)
+                worksheet.merge_range(f"{column_letter_start}{14}:{column_letter_end}{19}", instruction_2,merge_format)
+                worksheet.merge_range(f"{column_letter_start}{21}:{column_letter_end}{25}", instruction_3,merge_format)
+
+
+        
 
         writer.close()
 
